@@ -22,6 +22,3 @@ build/
 
 # Variáveis locais
 .env
-
-# (Opcional) resultados/figuras geradas pelo script
-outputs/
