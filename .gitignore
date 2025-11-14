@@ -1,0 +1,27 @@
+# venv
+.venv/
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.dist/
+build/
+
+# macOS
+.DS_Store
+
+# IDEs/editores
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Variáveis locais
+.env
+
+# (Opcional) resultados/figuras geradas pelo script
+outputs/
