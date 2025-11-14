@@ -1,13 +1,3 @@
-#!/usr/bin/env python3
-"""
-Mag7 Performance Analyzer
-- Baixa Adj Close (3 anos)
-- Normaliza em base 100
-- Plota performance acumulada
-- Calcula correlação (retornos diários) dos últimos 3 meses
-- Gera gráficos + CSVs em outputs/
-"""
-
 from __future__ import annotations
 
 import os
@@ -15,23 +5,19 @@ from pathlib import Path
 from typing import List, Tuple
 
 import pandas as pd
+import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Tickers da "Magnificent Seven"
-TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"]
+TICKERS = ["AAPL", "AMZN", "GOOGL", "META", "MSFT", "NVDA", "TSLA"]
 
-
+# Busca dados do yfinance
 def fetch_adj_close(tickers: List[str], years: int = 3) -> Tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
-    """
-    Baixa preços ajustados (Adj Close) dos últimos `years` anos.
-    Retorna: (DataFrame adj_close, start_date, end_date)
-    """
+
     end = pd.Timestamp.today().normalize()
     start = end - pd.DateOffset(years=years)
 
-    # yfinance: end é exclusivo; somamos 1 dia pra garantir captura de hoje
     raw = yf.download(
         tickers=tickers,
         start=start,
@@ -42,103 +28,95 @@ def fetch_adj_close(tickers: List[str], years: int = 3) -> Tuple[pd.DataFrame, p
     )
 
     if raw.empty:
-        raise RuntimeError("Download de dados falhou: DataFrame vazio retornado.")
+        raise RuntimeError("Download de dados falhou")
 
-    # Seleciona a coluna 'Adj Close' de forma robusta para 1 ou N tickers
-    if isinstance(raw.columns, pd.MultiIndex):
-        first_level = raw.columns.get_level_values(0)
-        if "Adj Close" in first_level:
-            adj = raw["Adj Close"].copy()
-        elif "Close" in first_level:
-            # Fallback: usa Close se Adj Close não estiver presente
-            adj = raw["Close"].copy()
-        else:
-            raise KeyError("Não encontrei 'Adj Close' ou 'Close' no retorno do yfinance.")
-    else:
-        # Caso raro: apenas 1 ticker vira coluna simples
-        cols = list(raw.columns)
-        if "Adj Close" in cols:
-            adj = raw[["Adj Close"]].copy()
-            adj.columns = [tickers[0]]
-        elif "Close" in cols:
-            adj = raw[["Close"]].copy()
-            adj.columns = [tickers[0]]
-        else:
-            raise KeyError("Colunas esperadas não encontradas (Adj Close/Close).")
+    adj = raw["Adj Close"].copy()
 
-    # Ordena colunas na ordem do input e trata NaNs
     adj = adj.reindex(columns=[t for t in tickers if t in adj.columns])
+
+    # dropna remove dias em que nenhum ativo foi negociado (ex: feriados)
+    # ffill() preenche dados ausentes com o valor do dia anterior (para normalização)
     adj = adj.dropna(how="all").ffill()
 
     return adj, start, end
 
 
+# Normaliza df para Base 100
 def normalize_base100(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normaliza todas as séries para iniciar em 100 na primeira data comum.
-    """
+   
+    # A normalização começa no primeiro dia em que todos os ativos têm dados
     df_common = df.dropna(how="any")
     if df_common.empty:
         raise ValueError("Sem interseção de datas com dados para todos os tickers.")
     base = df_common.iloc[0]
+
+    # Pega a primeira linha de dados comuns
     norm = (df_common / base) * 100.0
     return norm
 
 
-def plot_performance(norm: pd.DataFrame, out_path: Path) -> Path:
-    """
-    Plota gráfico de linhas da performance normalizada.
-    """
-    sns.set_theme(style="whitegrid", context="talk")
-    plt.figure(figsize=(13, 7))
-    for col in norm.columns:
-        plt.plot(norm.index, norm[col], label=col, linewidth=2)
-    plt.title("Mag7 — Performance Normalizada (base=100)")
-    plt.xlabel("Data")
-    plt.ylabel("Índice (base=100)")
-    plt.legend(ncol=2, frameon=True)
+# Gráfico de performance normalizada
+def plot_performance(norm: pd.DataFrame, start, end, out_path: Path) -> Path:
+    
+    plt.figure(figsize=(14, 8))
+    sns.set_style("whitegrid")
+    ax = norm.plot(linewidth=2, ax=plt.gca())
+    ax.set_title(f'Performance Normalizada (Base 100) das Magnificent Seven ({start.date()} a {end.date()})', fontsize=16, weight='bold')
+    ax.set_ylabel('Performance (Base 100)', fontsize=12)
+    ax.set_xlabel('Data', fontsize=12)
+    ax.legend(title='Tickers', loc='upper left', frameon=True)
+    
+    ax.axhline(100, linestyle='--', color='grey', linewidth=1)
+    
     plt.tight_layout()
-    plt.savefig(out_path, dpi=144)
+    plt.savefig(out_path, dpi=300)
     plt.close()
+
     return out_path
 
 
+# Correlação retornos diários dos últimos 3 meses
 def compute_corr_last3m(adj: pd.DataFrame, end: pd.Timestamp) -> pd.DataFrame:
-    """
-    Calcula correlação dos retornos diários dos últimos 3 meses.
-    """
+   
     start_3m = end - pd.DateOffset(months=3)
+
+    # Só dias com dados de todos os tickers
     recent = adj.loc[adj.index >= start_3m].dropna(how="any")
+
+    # Correlação calculada sobre retornos (evitar correlação espúria)
     returns = recent.pct_change().dropna(how="all")
     corr = returns.corr()
     return corr
 
 
+# Heatmap da matriz de correlação
 def plot_corr_heatmap(corr: pd.DataFrame, end: pd.Timestamp, out_path: Path) -> Path:
-    """
-    Plota heatmap da matriz de correlação (com anotações).
-    """
-    sns.set_theme(style="white", context="talk")
-    plt.figure(figsize=(9, 7))
-    ax = sns.heatmap(
-        corr,
-        annot=True,
-        fmt=".2f",
-        vmin=-1,
-        vmax=1,
-        center=0,
-        square=True,
-        linewidths=0.5,
-        linecolor="white",
-        cbar_kws={"shrink": 0.85, "label": "Correlação"},
-    )
-    plt.title(f"Mag7 — Correlação de Retornos Diários (últimos 3 meses até {end.date()})")
+
+    plt.figure(figsize=(10, 8))
+    
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+
+    sns.heatmap(corr, 
+                mask=mask, 
+                annot=True,     
+                fmt=".2f",      
+                cmap='coolwarm',
+                vmin=-1, 
+                vmax=1,
+                linewidths=0.5,
+                cbar_kws={"shrink":.8})
+                
+    plt.title(f'Matriz de Correlação de Retornos Diários (Últimos 3 Meses)', fontsize=16, weight='bold')
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
     plt.tight_layout()
     plt.savefig(out_path, dpi=144)
     plt.close()
+
     return out_path
 
 
+# Função principal
 def main():
     out_dir = Path("outputs")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -152,7 +130,7 @@ def main():
 
     perf_path = out_dir / "performance_normalized.png"
     print(f"Plotando performance → {perf_path}")
-    plot_performance(norm, perf_path)
+    plot_performance(norm, start, end, perf_path)
 
     print("Calculando correlação (últimos 3 meses)…")
     corr = compute_corr_last3m(adj, end)
@@ -161,13 +139,11 @@ def main():
     print(f"Plotando heatmap → {corr_path}")
     plot_corr_heatmap(corr, end, corr_path)
 
-    # (Útil p/ auditoria/reuso)
     adj.to_csv(out_dir / "adj_close.csv", index=True)
     norm.to_csv(out_dir / "normalized_base100.csv", index=True)
     corr.to_csv(out_dir / "corr_last3m.csv", index=True)
+    
 
-    print("✅ Pronto! Arquivos salvos em:", out_dir.resolve())
-
-
+# Só roda quando o script é executado diretamente
 if __name__ == "__main__":
     main()
