@@ -16,13 +16,13 @@ TICKERS = ["AAPL", "AMZN", "GOOGL", "META", "MSFT", "NVDA", "TSLA"]
 # Busca dados do yfinance
 def fetch_adj_close(tickers: List[str], years: int = 3) -> Tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
 
-    end = pd.Timestamp("2025-11-14")
+    end = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=1)[0]
     start = end - pd.DateOffset(years=years)
 
     raw = yf.download(
         tickers=tickers,
         start=start,
-        end=end,
+        end=end+pd.Timedelta(days=1),
         auto_adjust=False,
         progress=False,
         threads=True,
